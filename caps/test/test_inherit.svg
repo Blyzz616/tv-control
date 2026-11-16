@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 120 120" fill="#222">
+  <defs>
+    <linearGradient id="gr"><stop offset="0" stop-color="#0af"/><stop offset="1" stop-color="#a0f"/></linearGradient>
+    <path id="ring" d="M60 15 A45 45 0 1 1 59.9 15 Z M60 35 A25 25 0 1 0 60.1 35 Z"/>
+  </defs>
+  <rect width="120" height="120" rx="18" fill="#fff"/>
+  <g fill-rule="evenodd"><use xlink:href="#ring" fill="url(#gr)"/></g>
+  <path d="M50 50 H70 V70 H50 Z"/>
+</svg>

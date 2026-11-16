@@ -1,0 +1,81 @@
+# Chaos scripts called by the tv-control ESPHome device.
+# Paste into scripts.yaml (or Settings -> Automations & scenes -> Scripts -> Edit in YAML).
+#
+# CONFIRM these entity IDs in Chaos before use; they were never confirmed:
+#   media_player.lg_tv   - LG webOS TV
+#   button.lg_tv_wol     - the Wake on LAN button created by the WoL integration
+# App names must match the TV's source_list exactly (Developer Tools -> States -> the TV entity).
+#
+# Not yet tested against Chaos.
+
+tv_power_toggle:
+  alias: TV power toggle
+  mode: single
+  sequence:
+    - if:
+        - condition: state
+          entity_id: media_player.lg_tv
+          state: ["off", "unavailable"]
+      then:
+        - action: button.press
+          target:
+            entity_id: button.lg_tv_wol
+      else:
+        - action: media_player.turn_off
+          target:
+            entity_id: media_player.lg_tv
+
+tv_launch_app:
+  alias: TV launch app
+  description: Turns the TV on if needed and opens an app by its source name.
+  mode: restart
+  fields:
+    app:
+      description: Source name as listed in the TV's source_list
+      example: YouTube
+      required: true
+      selector:
+        text:
+  sequence:
+    - if:
+        - condition: state
+          entity_id: media_player.lg_tv
+          state: ["off", "unavailable"]
+      then:
+        - action: button.press
+          target:
+            entity_id: button.lg_tv_wol
+        - wait_template: "{{ states('media_player.lg_tv') not in ['off', 'unavailable'] }}"
+          timeout: "00:00:30"
+          continue_on_timeout: false
+        - delay: "00:00:03"
+    - action: media_player.select_source
+      target:
+        entity_id: media_player.lg_tv
+      data:
+        source: "{{ app }}"
+
+tv_volume_step:
+  alias: TV volume step
+  mode: queued
+  max: 10
+  fields:
+    direction:
+      description: up or down
+      example: up
+      required: true
+      selector:
+        select:
+          options: ["up", "down"]
+  sequence:
+    - if:
+        - condition: template
+          value_template: "{{ direction == 'up' }}"
+      then:
+        - action: media_player.volume_up
+          target:
+            entity_id: media_player.lg_tv
+      else:
+        - action: media_player.volume_down
+          target:
+            entity_id: media_player.lg_tv

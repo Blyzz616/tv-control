@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#000"/>
+  <g id="bars" fill="#c00">
+    <rect id="left"  x="40"  y="40" width="35" height="120"/>
+    <rect id="right" x="125" y="40" width="35" height="120"/>
+  </g>
+  <path id="bridge" fill="url(#nope)" d="M40 85 H160 V115 H40 Z"/>
+</svg>
