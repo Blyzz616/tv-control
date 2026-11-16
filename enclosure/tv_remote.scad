@@ -14,7 +14,7 @@
 // and a foot presses the M5 button. Caps snap in/out from the top; lid stays on.
 
 /* [Part to render] */
-part = "assembly"; // [assembly, section, lid, base, cap, cap_inlay, symbol_insert, art_insert, cap_preview, none]
+part = "assembly"; // [assembly, section, lid, base, cap, cap_inlay, symbol_insert, piece, cap_preview, none]
 // Rotate lid/cap into print orientation (top face on bed)
 print_orient = true;
 // Assembly only: show caps pressed
@@ -35,16 +35,22 @@ art_depth = 0.6;
 // Extra rotation of the artwork (deg)
 art_rotation = 0;
 
-/* [Cap artwork layers (caps/tools/svg2scad.py)] */
-// [[polygon_data, h_start, h_end, slope_angle], ...]. Heights are mm relative to the cap top
-// (0 = flush, negative = recessed). The height runs linearly from h_start to h_end across the
-// layer's own extent along slope_angle (0 = left->right, 90 = bottom->top, artwork upright).
-// Later layers win where layers overlap. Set by the files in caps/.
-art_layers = [];
+/* [Cap artwork pieces (caps/tools/svg2scad.py)] */
+// art_pieces = [[polygon, parent, bottom, h_start, h_end, angle, colour], ...]
+//   polygon : layer from a generated caps/gen/*.scad file
+//   parent  : -1 = sits in a pocket in the cap, n = sits in a pocket in piece n (an earlier piece)
+//   bottom  : depth of the piece's flat bottom, mm below the cap top (negative)
+//   h_start, h_end, angle : top surface, mm relative to the cap top (0 = flush, negative = recessed),
+//             linear from h_start to h_end across the piece's own extent along angle
+//             (0 = left->right, 90 = bottom->top, artwork upright)
+//   colour  : preview only
+// Where pieces with the same parent overlap, the later one wins.
+// Set by the files in caps/.
+art_pieces = [];
+piece = 0;               // part = "piece": which piece to export
 art_size = 30;           // SVG viewBox width -> this many mm
-art_pocket = 1.6;        // pocket depth in the cap; the insert's flat bottom sits on its floor
-art_insert_clear = 0.1;  // insert clearance per side
-art_insert_min = 0.6;    // thinnest allowed insert (warns below this)
+art_clear = 0.1;         // clearance per side between a piece and its pocket
+art_min_t = 0.6;         // thinnest allowed piece / pocket floor (warns below this)
 
 /* [Cap texture] */
 // Raised tactile texture on the cap top
@@ -245,183 +251,54 @@ module cap_core() {
             cylinder(r1=cap_r, r2=cap_r-0.6-eps, h=0.6+eps);
         }
         translate([0,0,cap_top-art_depth]) linear_extrude(art_depth+1) art2d();
-        if (len(art_layers) > 0)
-            translate([0,0,cap_top-art_pocket]) linear_extrude(art_pocket+1) art_frame() for (l=art_layers) art_poly(l[0]);
+        art_pockets(-1);
     }
 }
 
-// ---- layered artwork (SVG polygons from caps/tools/svg2scad.py) ----
+// ---- artwork pieces (SVG polygons from caps/tools/svg2scad.py) ----
 module art_poly(d) polygon(d[0], d[1]);
 module art_frame() { rotate((cap_slot == "A" ? -90 : 90) + art_rotation) scale([art_size, art_size, 1]) children(); }
-module art_layer_own(i) {
+// footprint of piece i, minus later pieces with the same parent
+module art_own(i) {
     difference() {
-        art_poly(art_layers[i][0]);
-        if (i < len(art_layers)-1) for (j=[i+1:len(art_layers)-1]) art_poly(art_layers[j][0]);
+        art_poly(art_pieces[i][0]);
+        if (i < len(art_pieces)-1) for (j=[i+1:len(art_pieces)-1]) if (art_pieces[j][1] == art_pieces[i][1]) art_poly(art_pieces[j][0]);
     }
 }
-// glue-in insert: flat bottom on the pocket floor, each layer's top on its own (sloped) plane
-module art_insert() {
-    zb = cap_top - art_pocket;
-    for (i=[0:len(art_layers)-1]) {
-        l = art_layers[i]; a = l[3];
-        ss = [for (p=l[0][0]) p[0]*cos(a) + p[1]*sin(a)];
-        s0 = min(ss); s1 = max(ss);
-        k = s1 > s0 ? (l[2]-l[1])/(s1-s0) : 0;
-        if (art_pocket + min(l[1], l[2]) < art_insert_min)
-            echo(str("WARNING: art layer ", i, " insert is ", art_pocket + min(l[1], l[2]), " mm at its thinnest"));
-        if (max(l[1], l[2]) > 0)
-            echo(str("NOTE: art layer ", i, " stands ", max(l[1], l[2]), " mm proud of the cap top"));
+// pockets for the pieces whose parent is p (-1 = the cap)
+module art_pockets(p) {
+    if (len(art_pieces) > 0) for (j=[0:len(art_pieces)-1]) if (art_pieces[j][1] == p)
+        translate([0,0,cap_top+art_pieces[j][2]]) linear_extrude(-art_pieces[j][2]+10) art_frame() art_own(j);
+}
+// half-space under the piece's (sloped) top surface
+module art_top(i) {
+    l = art_pieces[i]; a = l[5];
+    ss = [for (q=l[0][0]) q[0]*cos(a) + q[1]*sin(a)];
+    s0 = min(ss); s1 = max(ss);
+    k = s1 > s0 ? (l[4]-l[3])/(s1-s0) : 0;
+    art_frame() multmatrix([[1,0,0,0],[0,1,0,0],[k*cos(a), k*sin(a), 1, cap_top + l[3] - k*s0],[0,0,0,1]])
+        translate([-2,-2,-50]) cube([4,4,50]);
+}
+module art_piece(i) {
+    l = art_pieces[i];
+    if (min(l[3], l[4]) - l[2] < art_min_t)
+        echo(str("WARNING: piece ", i, " is only ", min(l[3], l[4]) - l[2], " mm thick at its thinnest"));
+    for (j=[0:len(art_pieces)-1]) if (art_pieces[j][1] == i && art_pieces[j][2] - l[2] < art_min_t)
+        echo(str("WARNING: piece ", i, " pocket for piece ", j, " leaves a ", art_pieces[j][2] - l[2], " mm floor"));
+    difference() {
         intersection() {
-            translate([0,0,zb]) linear_extrude(art_pocket + max(l[1], l[2]) + 1)
-                offset(delta=-art_insert_clear) art_frame() art_layer_own(i);
-            art_frame() multmatrix([[1,0,0,0],[0,1,0,0],[k*cos(a), k*sin(a), 1, cap_top + l[1] - k*s0],[0,0,0,1]])
-                translate([-2,-2,-50]) cube([4,4,50]);
+            translate([0,0,cap_top+l[2]]) linear_extrude(max(l[3], l[4]) - l[2] + 1)
+                offset(delta=-art_clear) art_frame() art_own(i);
+            art_top(i);
         }
+        art_pockets(i);
     }
 }
-
-module texture2d() {
-    n = ceil(cap_r/texture_pitch)+1;
-    if (texture == "lines")
-        for (i=[-n:n]) translate([i*texture_pitch-texture_w/2, -cap_r-1]) square([texture_w, 2*cap_r+2]);
-    if (texture == "crosshatch")
-        for (a=[45,-45]) rotate(a) for (i=[-n:n]) translate([i*texture_pitch*1.6-texture_w/2, -cap_r-1]) square([texture_w, 2*cap_r+2]);
-    if (texture == "waves") {
-        steps = 120; L2 = cap_r+2;
-        for (i=[-n:n]) {
-            x0 = i*texture_pitch*1.3;
-            pts = [for (k=[0:steps]) let(y=-L2+2*L2*k/steps) [x0+wave_amp*sin(360*y/wave_len)-texture_w/2, y]];
-            pts2 = [for (k=[steps:-1:0]) let(y=-L2+2*L2*k/steps) [x0+wave_amp*sin(360*y/wave_len)+texture_w/2, y]];
-            polygon(concat(pts, pts2));
-        }
-    }
+module art_pieces_all() { for (i=[0:len(art_pieces)-1]) color(art_pieces[i][6]) art_piece(i); }
+module art_check() {
+    for (i=[0:len(art_pieces)-1]) if (art_pieces[i][1] == -1 && disk_t + art_pieces[i][2] < art_min_t)
+        echo(str("WARNING: pocket for piece ", i, " leaves a ", disk_t + art_pieces[i][2], " mm cap floor"));
 }
-
-module symbol_cut() {
-    st = 4; dh = symbol_depth/st;
-    for (k=[0:st])
-        translate([0,0,cap_top-symbol_depth+k*dh-(k==st ? 0 : 0)])
-            linear_extrude(k==st ? 1 : dh+eps)
-                offset(delta=symbol_chamfer*k/st) symbol_placed();
-}
-
-// glue-in insert: the engraving volume shrunk by insert_clear, flush with the cap top
-module symbol_insert() {
-    $no_ticks = true;   // ticks stay cap colour
-    st = 4; dh = symbol_depth/st;
-    for (k=[0:st-1])
-        translate([0,0,cap_top-symbol_depth+k*dh])
-            linear_extrude(dh+(k<st-1 ? eps : 0))
-                offset(delta=symbol_chamfer*k/st-insert_clear) symbol_placed();
-}
-
-module symbol_placed() {
-    rot = (cap_slot == "A" ? -90 : 90) + art_rotation;   // upright with the cable end on your right
-    rotate(rot) scale(symbol_size/30) symbol2d();
-}
-
-// symbols drawn in a 30 mm box, "up" = +Y
-module symbol2d() {
-    symbol2d_extra();
-    timer_symbols();
-    if (symbol == "fan") {
-        difference() { circle(r=3.6); circle(r=1.6); }             // hub (no outer ring)
-        for (a=[0:120:359]) rotate(a)                               // 3 swept blades
-            hull() { translate([4.0,0.6]) circle(r=1.4); translate([9.4,3.0]) circle(r=3.2); translate([12.6,1.6]) circle(r=2.0); }
-    }
-    if (symbol == "snowflake") {
-        w = 1.4;
-        for (a=[0:60:359]) rotate(a) {
-            translate([-w/2,0]) square([w,13.5]);                       // arm
-            translate([0,13.5]) circle(d=w);
-            for (p=[[7.0,4.0],[10.6,2.6]])                              // side branches
-                translate([0,p[0]]) for (m=[-1,1]) rotate(m*50) { translate([-w/2,0]) square([w,p[1]]); translate([0,p[1]]) circle(d=w); }
-        }
-        circle(r=2.2);
-    }
-    if (symbol == "nolight") {
-        bar_a = -45; bar_w = 2.2;
-        difference() { circle(r=15); circle(r=12.8); }              // ring
-        difference() {
-            union() {                                               // solid bulb
-                translate([0,-1.6]) {                                // centred under the slash
-                hull() { translate([0,4.2]) circle(r=5.0); translate([-1.5,-3.4]) square([3.0,0.1]); }  // slim pear-shaped bulb
-                translate([-1.9,-5.1]) offset(r=0.4) square([3.8,0.8]);   // socket rings
-                translate([-1.5,-6.9]) offset(r=0.4) square([3.0,0.8]);
-                translate([-0.8,-8.0]) offset(r=0.3) square([1.6,0.4]);   // tip
-                }
-            }
-            rotate(bar_a) square([40, bar_w+2.4], center=true);     // gap around the slash
-        }
-        intersection() { rotate(bar_a) square([40, bar_w], center=true); circle(r=13.5); }
-    }
-}
-
-module light_burst(rc=3.4, r0=4.4, r1=9.6, w=1.0, n=8) {   // rays start at the sun ring
-    difference() { circle(r=rc+1.0); circle(r=rc); }                  // light source ring
-    for (a=[0:360/n:359]) rotate(a+22.5) hull() { translate([0,r0]) circle(d=w); translate([0,r1]) circle(d=w); }
-    for (a=[0:360/n:359]) rotate(a) hull() { translate([0,r0]) circle(d=w); translate([0,r0+(r1-r0)/2]) circle(d=w); }   // half-length rays
-}
-module clock_ring() {
-    difference() { circle(r=15); circle(r=13.4); }                   // dial ring
-    if (!$no_ticks) for (a=[0:30:359]) rotate(a) hull() { translate([0,10.2]) circle(d=tick_w); translate([0,11.8]) circle(d=tick_w); }  // 12 hour ticks
-}
-module timer_symbols() {
-    if (symbol == "timer_add") {
-        clock_ring();
-        for (a=[0,90]) rotate(a) hull() { translate([0,-6.5]) circle(d=2.4); translate([0,6.5]) circle(d=2.4); }   // plus
-    }
-    if (symbol == "timer_query_hourglass") {
-        clock_ring();
-        scale(0.8) {
-            difference() {
-                polygon([[-4.6,6.8],[4.6,6.8],[0.6,0],[4.6,-6.8],[-4.6,-6.8],[-0.6,0]]);
-                offset(delta=-1.2) polygon([[-4.6,6.8],[4.6,6.8],[0.6,0],[4.6,-6.8],[-4.6,-6.8],[-0.6,0]]);
-            }
-            for (y=[-7.6,7.6]) translate([-5.8,y-0.8]) offset(r=0.4) square([11.6,1.6], center=false);
-            polygon([[-2.6,-6.0],[2.6,-6.0],[0,-2.8]]);                                 // sand
-        }
-    }
-    if (symbol == "timer_query_eye") {
-        clock_ring();
-        difference() {
-            intersection() { translate([0,-4.2]) circle(r=8.4); translate([0,4.2]) circle(r=8.4); }
-            intersection() { translate([0,-4.2]) circle(r=7.1); translate([0,4.2]) circle(r=7.1); }
-        }
-        circle(r=2.2);
-    }
-    if (symbol == "timer_query_qmark") {
-        clock_ring();
-        translate([0,0.3]) text("?", size=13, font="Liberation Sans:style=Bold", halign="center", valign="center");
-    }
-}
-
-module symbol2d_extra() {
-    bar_w = 2.2;
-    if (symbol == "lightsoff" || symbol == "lightsoff_noring") {
-        if (symbol == "lightsoff") difference() { circle(r=15); circle(r=12.8); }
-        difference() { light_burst(); rotate(-45) square([40, bar_w+2.4], center=true); }
-        intersection() { rotate(-45) square([40, bar_w], center=true); circle(r=symbol=="lightsoff" ? 13.5 : 12); }
-    }
-    if (symbol == "power") {
-        difference() {
-            difference() { circle(r=11); circle(r=8.8); }
-            translate([-3.4,0]) square([6.8,20]);
-        }
-        hull() { translate([0,2]) circle(d=2.2); translate([0,13]) circle(d=2.2); }
-    }
-}
-
-module art2d() {
-    rot = (cap_slot == "A" ? -90 : 90) + art_rotation; // upright with the cable end on your right
-    rotate(rot) {
-        if (cap_label != "")
-            text(cap_label, size=cap_label_size, font=cap_label_font, halign="center", valign="center");
-        if (cap_svg != "")
-            resize([cap_svg_size, 0], auto=true) import(cap_svg, center=true);
-    }
-}
-module cap_inlay() { translate([0,0,cap_top-art_depth]) linear_extrude(art_depth) art2d(); }
 
 // ================= HINGE POSTS (cap-local, on the base) =================
 module hinge_posts() {
@@ -627,15 +504,17 @@ if (part == "lid") {
 } else if (part == "base") {
     base();
 } else if (part == "cap") {
+    if (len(art_pieces) > 0) art_check();
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) cap_body(); else cap_body();
 } else if (part == "symbol_insert") {
     // printed visible-face down
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) symbol_insert(); else symbol_insert();
-} else if (part == "art_insert") {
+} else if (part == "piece") {
     // printed flat bottom down, as modelled
-    translate([0,0,-(cap_top-art_pocket)]) art_insert();
+    translate([0,0,-(cap_top+art_pieces[piece][2])]) art_piece(piece);
 } else if (part == "cap_preview") {
-    color("dimgray") cap_body(); color("red") art_insert();
+    art_check();
+    color("dimgray") cap_body(); art_pieces_all();
 } else if (part == "cap_inlay") {
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) cap_inlay(); else cap_inlay();
 } else if (part == "none") {
