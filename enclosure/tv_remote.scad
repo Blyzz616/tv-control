@@ -499,26 +499,31 @@ module cap_placed(i, pressed=false) {
         translate([0,hy,hz]) rotate([pressed ? -press_ang : 0,0,0]) translate([0,-hy,-hz]) cap_body();
 }
 
-if (part == "lid") {
+// export_piece (numbers only, so it is easy to pass on any command line): -1 = cap, n = piece n
+export_piece = -99;
+part_  = export_piece == -1 ? "cap" : export_piece >= 0 ? "piece" : part;
+piece_ = export_piece >= 0 ? export_piece : piece;
+
+if (part_ == "lid") {
     if (print_orient) translate([0,0,lid_top]) rotate([180,0,0]) lid(); else lid();
-} else if (part == "base") {
+} else if (part_ == "base") {
     base();
-} else if (part == "cap") {
+} else if (part_ == "cap") {
     if (len(art_pieces) > 0) art_check();
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) cap_body(); else cap_body();
-} else if (part == "symbol_insert") {
+} else if (part_ == "symbol_insert") {
     // printed visible-face down
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) symbol_insert(); else symbol_insert();
-} else if (part == "piece") {
+} else if (part_ == "piece") {
     // printed flat bottom down, as modelled
-    translate([0,0,-(cap_top+art_pieces[piece][2])]) art_piece(piece);
-} else if (part == "cap_preview") {
+    translate([0,0,-(cap_top+art_pieces[piece_][2])]) art_piece(piece_);
+} else if (part_ == "cap_preview") {
     art_check();
     color("dimgray") cap_body(); art_pieces_all();
-} else if (part == "cap_inlay") {
+} else if (part_ == "cap_inlay") {
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) cap_inlay(); else cap_inlay();
-} else if (part == "none") {
-} else if (part == "section") {
+} else if (part_ == "none") {
+} else if (part_ == "section") {
     difference() {
         union() {
             color("tan") base(); color("lightblue", 0.9) lid(); unit();
