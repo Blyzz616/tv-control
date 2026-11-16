@@ -4,7 +4,8 @@
 # Jellyfin and Netflix need shape numbers: run once with -List, then put them in $Layers below.
 param(
     [Parameter(Mandatory=$true)][ValidateSet("youtube","jellyfin","netflix","prime")][string]$Name,
-    [switch]$List
+    [switch]$List,
+    [string]$Scad   # optional: full path to openscad.exe
 )
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -26,10 +27,13 @@ $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command py -ErrorAction SilentlyContinue).Source }
 if (-not $py) { throw "Python not found on PATH." }
 
-# find OpenSCAD: PATH first, then the usual install folders
-$scad = (Get-Command openscad -ErrorAction SilentlyContinue).Source
+# find OpenSCAD: -Scad, then PATH, then the usual install folders (incl. Nightly builds)
+$scad = $Scad
+if (-not $scad) { $scad = (Get-Command openscad -ErrorAction SilentlyContinue).Source }
 if (-not $scad) {
-    $scad = Get-ChildItem "C:\Program Files*", "$env:LOCALAPPDATA\Programs" -Recurse -Filter "openscad.exe" -ErrorAction SilentlyContinue |
+    $scad = Get-ChildItem "C:\Program Files*", "$env:LOCALAPPDATA\Programs", "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" `
+              -Recurse -Depth 3 -Filter "openscad*.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^openscad(\.com|\.exe)?$' -or $_.Name -eq 'openscad.exe' } |
             Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not $scad) { throw "OpenSCAD not found. Install it (winget install OpenSCAD.OpenSCAD) and rerun." }
