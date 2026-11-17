@@ -14,7 +14,7 @@
 // and a foot presses the M5 button. Caps snap in/out from the top; lid stays on.
 
 /* [Part to render] */
-part = "assembly"; // [assembly, section, lid, base, cap, cap_inlay, symbol_insert, piece, cap_preview, none]
+part = "assembly"; // [assembly, section, lid, base, cap, cap_inlay, symbol_insert, piece, cap_preview, scroll_clamp, scroll_hood, none]
 // Rotate lid/cap into print orientation (top face on bed)
 print_orient = true;
 // Assembly only: show caps pressed
@@ -80,9 +80,10 @@ unit_stl = "ref/m5_dual_button_unit.stl"; // only used by assembly/section views
 scroll_dir = "ref/scroll_parts/";          // U186 parts split from M5's Unit_Scroll.stl (housing frame)
 
 /* [Scroll wheel: M5Stack Unit Scroll U186] */
-// top = wheel rolls front/back on the lid; side = wheel pokes out of the -X long wall
-scroll_mount = "top"; // [top, side, none]
-// Extra gap added between the two halves (caps 1-2 | caps 3-4), per side. -1 = auto (top 3, side 5, none 0)
+// corner = bare U186 PCB (cut at the bridge) + wheel at 45 deg in the front-top edge (front = -X, USB-C is +X)
+// top / side = older v0 options that reuse M5's shell geometry
+scroll_mount = "corner"; // [corner, top, side, none]
+// Extra gap added between the two halves (caps 1-2 | caps 3-4), per side. -1 = auto (corner 0, top 3, side 5, none 0)
 spread = -1;
 // top only: X position of the shell's Grove end (shell is 32 mm long along X)
 scroll_top_x0 = -12.6;
@@ -90,6 +91,34 @@ scroll_top_x0 = -12.6;
 scroll_slot_clear = 0.4;
 // side only: how far the shell drops below the lid's bottom edge into the base
 scroll_side_drop = 3;
+
+/* [Corner wheel: bare U186 PCB + wheel] */
+// ALL numbers below are estimates scaled from photos (wheel = 13.8 mm). CHECK with calipers before printing.
+// Module frame: u = along the PCB in the roll direction (axle at u = 0), w = along the axle (PCB edge at w = 0,
+// encoder side), v = up from the PCB top face.
+cm_pcb_u0  = 6.9;   // CHECK: axle -> PCB edge on the wheel side
+cm_pcb_u1  = 6.7;   // CHECK: axle -> cut edge (the bridge)
+cm_pcb_w   = 18.7;  // CHECK: PCB width along the axle
+cm_pcb_t   = 1.0;   // CHECK: PCB thickness
+cm_pad_h   = 1.2;   // CHECK: tallest solder joint / pin on the underside
+cm_axle_h  = 9.4;   // CHECK: axle centre above the PCB top
+cm_wheel_d = 13.8;  // wheel diameter (M5 model)
+cm_enc_w   = 5.6;   // CHECK: encoder band along the axle, from the PCB edge (w = 0)
+cm_enc_u   = 5.1;   // CHECK: encoder half-width in the roll direction
+cm_enc_top = 3.8;   // CHECK: encoder top above the axle
+cm_sw_w0   = 14.7;  // CHECK: where the microswitch band starts along the axle (it runs to cm_pcb_w)
+cm_sw_u    = 6.8;   // CHECK: microswitch half-width in the roll direction
+cm_sw_top  = -2.6;  // CHECK: microswitch top relative to the axle (negative = below)
+cm_brk_r   = 3.4;   // CHECK: radius of the white bracket around the axle stub
+cm_tilt    = 45;    // module tilt: wheel points out of the front-top edge
+cm_inset   = 4.2;   // axle inset from the front face and from the top face
+cm_clear   = 0.25;  // fit around the encoder / switch (they locate the module)
+cm_wheel_clear = 0.6;
+cm_skin    = 1.2;   // hood wall over the encoder corner
+cm_clamp_t = 2.4;   // clamp plate under the PCB (separate part, 2 screws)
+cm_screw_d = 2.4;   // M2 clearance in the clamp
+cm_pilot_d = 1.7;   // M2 self-tapping pilot in the lid bosses
+cm_boss_d  = 5.5;
 
 /* [Hardware: M4 bolt + heat-set insert] */
 bolt_len      = 15.6; // incl. head
@@ -149,7 +178,7 @@ unit_w = 24; unit_l = 48; unit_y0 = -30; unit_y1 = 18;
 sc_shell = [24, 32, 14.8];
 sc_wheel_c = [12.4, 22.4, 9.7];       // wheel centre (wheel spans x 4.1..20.7, d 13.8)
 sc_shoulder = [7.7, 16.3];            // open gap between the shell's top shoulders (wheel sits here)
-sp = spread >= 0 ? spread : (scroll_mount == "top" ? 3 : scroll_mount == "side" ? 5 : 0);
+sp = spread >= 0 ? spread : (scroll_mount == "top" ? 3 : scroll_mount == "side" ? 5 : 0);   // corner: 0
 
 // ---- enclosure ----
 W = 54; L = 206 + 2*sp; R_corner = 5; wall = 2.4;
@@ -328,6 +357,23 @@ module hinge_posts() {
 
 // ================= LID =================
 module lid() {
+    if (scroll_mount == "corner") lid_corner(); else lid_shell();
+}
+module lid_corner() {
+    difference() {
+        union() {
+            lid_body();
+            intersection() { cm_xform() cm_hood(); cm_inside(); }   // the part of the hood inside the box faces
+            intersection() {           // screw bosses for the clamp, kept inside the box
+                cm_xform() cm_bosses();
+                translate([0,0,base_h]) rrect(W-0.2, L-0.2, R_corner, lid_top-base_h-0.1);
+            }
+        }
+        cm_xform() cm_clear_env();
+        cm_xform() cm_pilots();
+    }
+}
+module lid_shell() {
     difference() {
         union() {
             difference() {
@@ -412,6 +458,68 @@ module esp_press() {
     }
 }
 
+// ================= CORNER WHEEL (bare U186 PCB) =================
+// module frame -> enclosure: axle cm_inset in from the front (-X) and top faces, centred on Y
+module cm_xform() {
+    translate([-W/2 + cm_inset, -cm_pcb_w/2, lid_top - cm_inset]) rotate([0, -cm_tilt, 0]) translate([0, 0, -cm_axle_h]) children();
+}
+module cm_box(u0, u1, w0, w1, v0, v1) { translate([u0, w0, v0]) cube([u1-u0, w1-w0, v1-v0]); }
+module cm_wheel_cyl(r, w0, w1) { translate([0, w0, cm_axle_h]) rotate([-90,0,0]) cylinder(r=r, h=w1-w0); }
+// everything the module needs, plus the path it goes in by (straight along +v from inside the box)
+module cm_clear_env() {
+    c = cm_clear; deep = 40;
+    cm_box(-cm_pcb_u0-0.3, cm_pcb_u1+0.3, -0.3, cm_pcb_w+0.3, -deep, 0.01);                              // PCB + clamp + entry
+    cm_box(-cm_enc_u-c, cm_enc_u+c, -c, cm_enc_w+c, -deep, cm_axle_h+cm_enc_top+c);                      // encoder
+    cm_box(-cm_sw_u-c, cm_sw_u+c, cm_sw_w0-c, cm_pcb_w+c, -deep, cm_axle_h+cm_sw_top+c);                 // microswitch
+    hull() { cm_wheel_cyl(cm_brk_r+c, cm_sw_w0-1, cm_pcb_w+c); translate([0,0,-deep]) cm_wheel_cyl(cm_brk_r+c, cm_sw_w0-1, cm_pcb_w+c); } // bracket
+    hull() { cm_wheel_cyl(cm_wheel_d/2+cm_wheel_clear, cm_enc_w, cm_sw_w0);                               // wheel (opens the corner)
+             translate([0,0,-deep]) cm_wheel_cyl(cm_wheel_d/2+cm_wheel_clear, cm_enc_w, cm_sw_w0); }
+}
+// the box volume (inside the front and top faces); the hood part outside it is printed separately
+module cm_inside() { translate([-W/2, -L/2, -1]) cube([W, L, lid_top+1]); }
+// separate part: the outer half of the hood (the lid prints top face down, so nothing can stick out of it)
+module cm_hood_cap() {
+    difference() {
+        difference() { cm_xform() cm_hood(); cm_inside(); }
+        cm_xform() cm_clear_env();
+    }
+}
+// cover over the encoder corner, which sits proud of the box faces
+module cm_hood() {
+    c = cm_clear; k = cm_skin;
+    intersection() {
+        hull() for (u=[-cm_enc_u-c-k+1, cm_enc_u+c+k-1], w=[-c-k+1, cm_enc_w-1], v=[cm_axle_h-4, cm_axle_h+cm_enc_top+c+k-1])
+            translate([u, w, v]) sphere(r=1, $fn=24);
+        cm_box(-20, 20, -10, cm_enc_w, cm_axle_h-4, 40);
+    }
+}
+module cm_screw_pts() { for (w=[-cm_boss_d/2-1.2, cm_pcb_w+cm_boss_d/2+1.2]) translate([0, w, 0]) children(); }
+module cm_bosses() {
+    cm_screw_pts() translate([0, 0, -cm_pcb_t]) cylinder(d=cm_boss_d, h=30, $fn=32);
+}
+module cm_pilots() {
+    cm_screw_pts() translate([0, 0, -cm_pcb_t-1]) cylinder(d=cm_pilot_d, h=10, $fn=24);
+}
+// separate part: presses the PCB into place from inside the box; recess clears the underside joints,
+// and is open past the cut edge for the wires
+module cm_clamp() {
+    difference() {
+        hull() cm_screw_pts() translate([0,0,-cm_pcb_t-cm_clamp_t]) {
+            translate([-cm_pcb_u0, -cm_boss_d/2, 0]) cube([cm_pcb_u0+cm_pcb_u1, cm_boss_d, cm_clamp_t]);
+        }
+        cm_box(-cm_pcb_u0+0.8, cm_pcb_u1+5, 0.8, cm_pcb_w-0.8, -cm_pcb_t-cm_pad_h, 1);
+        cm_screw_pts() translate([0,0,-10]) cylinder(d=cm_screw_d, h=20, $fn=24);
+    }
+}
+module cm_model() {   // the bare module, for views and checks
+    color("green") cm_box(-cm_pcb_u0, cm_pcb_u1, 0, cm_pcb_w, -cm_pcb_t, 0);
+    color("dimgray") cm_box(-cm_pcb_u0+0.5, cm_pcb_u1-0.5, 0.5, cm_pcb_w-0.5, -cm_pcb_t-cm_pad_h, -cm_pcb_t);
+    color("black") cm_box(-cm_enc_u, cm_enc_u, 0, cm_enc_w, 0, cm_axle_h+cm_enc_top);
+    color("black") cm_box(-cm_sw_u, cm_sw_u, cm_sw_w0, cm_pcb_w, 0, cm_axle_h+cm_sw_top);
+    color("white") cm_wheel_cyl(cm_brk_r, cm_sw_w0, cm_pcb_w);
+    color("red") cm_wheel_cyl(cm_wheel_d/2, cm_enc_w, cm_sw_w0);
+}
+
 // ================= SCROLL (U186) =================
 // shell frame -> enclosure
 module scroll_xform() {
@@ -446,7 +554,8 @@ module scroll_base_clear() {
         translate([-W/2+wall, -sc_shell[1]/2-0.3, base_h-scroll_side_drop-0.3]) cube([sc_shell[2]+2.3-wall+0.3, sc_shell[1]+0.6, 10]);
 }
 module scroll_parts() {   // the reused M5 parts, for assembly views
-    scroll_xform() {
+    if (scroll_mount == "corner") { cm_xform() cm_model(); color("orange") cm_xform() cm_clamp(); color("gray") cm_hood_cap(); }
+    else scroll_xform() {
         color("orange") import(str(scroll_dir, "wheel.stl"));
         color("red") import(str(scroll_dir, "hub_part.stl"));
         color("green") import(str(scroll_dir, "corner_part.stl"));
@@ -514,6 +623,12 @@ if (part_ == "lid") {
 } else if (part_ == "symbol_insert") {
     // printed visible-face down
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) symbol_insert(); else symbol_insert();
+} else if (part_ == "scroll_clamp") {
+    translate([0,0,cm_pcb_t+cm_clamp_t]) cm_clamp();          // flat side down
+} else if (part_ == "scroll_hood") {
+    // two glue-on pads over the encoder: one on the top face, one on the front face, both laid flat
+    translate([0,0,-lid_top]) intersection() { cm_hood_cap(); translate([-100,-100,lid_top]) cube(200); }
+    translate([-W/2-25, 12, -W/2]) rotate([0,90,0]) intersection() { cm_hood_cap(); translate([-200,-100,-100]) cube([200-W/2, 200, 200]); }
 } else if (part_ == "piece") {
     // printed flat bottom down, as modelled
     translate([0,0,-(cap_top+art_pieces[piece_][2])]) art_piece(piece_);
