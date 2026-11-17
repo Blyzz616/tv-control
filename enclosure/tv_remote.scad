@@ -14,7 +14,7 @@
 // and a foot presses the M5 button. Caps snap in/out from the top; lid stays on.
 
 /* [Part to render] */
-part = "assembly"; // [assembly, section, lid, base, cap, cap_inlay, symbol_insert, piece, cap_preview, scroll_clamp, scroll_hood, none]
+part = "assembly"; // [assembly, section, lid, base, cap, cap_inlay, symbol_insert, piece, cap_preview, scroll_clamp, scroll_hood, scroll_tire, none]
 // Rotate lid/cap into print orientation (top face on bed)
 print_orient = true;
 // Assembly only: show caps pressed
@@ -101,8 +101,14 @@ cm_pcb_u1  = 6.7;   // CHECK: axle -> cut edge (the bridge)
 cm_pcb_w   = 18.7;  // CHECK: PCB width along the axle
 cm_pcb_t   = 1.0;   // CHECK: PCB thickness
 cm_pad_h   = 1.2;   // CHECK: tallest solder joint / pin on the underside
-cm_axle_h  = 9.4;   // CHECK: axle centre above the PCB top
-cm_wheel_d = 13.8;  // wheel diameter (M5 model)
+cm_axle_h  = 8.8;   // CHECK: axle centre above the PCB top (8.8 from the side photo, scaled by the wheel)
+cm_wheel_d = 13.8;  // original wheel diameter (M5 model)
+// printed tire sleeve pressed over the original wheel (keeps M5's hub and encoder shaft). 0 = no sleeve.
+// Max is about 2 * (cm_axle_h - tallest part under the wheel - 0.2); 15.4 leaves ~1.1 mm over the PCB.
+cm_tire_od = 15.4;
+cm_tire_id = 13.75;  // CHECK: snug over the original tire's ridges (add a drop of glue)
+cm_tire_w  = 7.9;    // CHECK: original tire width along the axle
+cm_tire_w0 = 6.2;    // CHECK: where the tire starts along the axle (w); centred between encoder and switch
 cm_enc_w   = 5.6;   // CHECK: encoder band along the axle, from the PCB edge (w = 0)
 cm_enc_u   = 5.1;   // CHECK: encoder half-width in the roll direction
 cm_enc_top = 3.8;   // CHECK: encoder top above the axle
@@ -114,7 +120,7 @@ cm_tilt    = 45;    // module tilt: wheel points out of the front-top edge
 cm_inset   = 4.2;   // axle inset from the front face and from the top face
 cm_clear   = 0.25;  // fit around the encoder / switch (they locate the module)
 cm_wheel_clear = 0.6;
-cm_skin    = 1.2;   // hood wall over the encoder corner
+cm_skin    = 0.8;   // hood wall over the encoder corner (2 perimeters; keeps the pads lower than the tire)
 cm_clamp_t = 2.4;   // clamp plate under the PCB (separate part, 2 screws)
 cm_screw_d = 2.4;   // M2 clearance in the clamp
 cm_pilot_d = 1.7;   // M2 self-tapping pilot in the lid bosses
@@ -465,6 +471,19 @@ module cm_xform() {
 }
 module cm_box(u0, u1, w0, w1, v0, v1) { translate([u0, w0, v0]) cube([u1-u0, w1-w0, v1-v0]); }
 module cm_wheel_cyl(r, w0, w1) { translate([0, w0, cm_axle_h]) rotate([-90,0,0]) cylinder(r=r, h=w1-w0); }
+function cm_wheel_r() = cm_tire_od > 0 ? cm_tire_od/2 : cm_wheel_d/2;
+// separate part: knurled tire sleeve, printed flat
+module cm_tire() {
+    n = 30;
+    difference() {
+        union() {
+            cylinder(d=cm_tire_od-0.8, h=cm_tire_w, $fn=96);
+            for (i=[0:n-1]) rotate(i*360/n) translate([cm_tire_od/2-0.6, 0, 0]) cylinder(r=0.6, h=cm_tire_w, $fn=16);
+        }
+        translate([0,0,-1]) cylinder(d=cm_tire_id, h=cm_tire_w+2, $fn=96);
+        for (z=[0, cm_tire_w]) translate([0,0,z-0.4]) cylinder(d1=cm_tire_id+0.8, d2=cm_tire_id, h=0.8, $fn=96);   // lead-in chamfers
+    }
+}
 // everything the module needs, plus the path it goes in by (straight along +v from inside the box)
 module cm_clear_env() {
     c = cm_clear; deep = 40;
@@ -472,8 +491,8 @@ module cm_clear_env() {
     cm_box(-cm_enc_u-c, cm_enc_u+c, -c, cm_enc_w+c, -deep, cm_axle_h+cm_enc_top+c);                      // encoder
     cm_box(-cm_sw_u-c, cm_sw_u+c, cm_sw_w0-c, cm_pcb_w+c, -deep, cm_axle_h+cm_sw_top+c);                 // microswitch
     hull() { cm_wheel_cyl(cm_brk_r+c, cm_sw_w0-1, cm_pcb_w+c); translate([0,0,-deep]) cm_wheel_cyl(cm_brk_r+c, cm_sw_w0-1, cm_pcb_w+c); } // bracket
-    hull() { cm_wheel_cyl(cm_wheel_d/2+cm_wheel_clear, cm_enc_w, cm_sw_w0);                               // wheel (opens the corner)
-             translate([0,0,-deep]) cm_wheel_cyl(cm_wheel_d/2+cm_wheel_clear, cm_enc_w, cm_sw_w0); }
+    hull() { cm_wheel_cyl(cm_wheel_r()+cm_wheel_clear, cm_enc_w, cm_sw_w0);                               // wheel (opens the corner)
+             translate([0,0,-deep]) cm_wheel_cyl(cm_wheel_r()+cm_wheel_clear, cm_enc_w, cm_sw_w0); }
 }
 // the box volume (inside the front and top faces); the hood part outside it is printed separately
 module cm_inside() { translate([-W/2, -L/2, -1]) cube([W, L, lid_top+1]); }
@@ -518,6 +537,7 @@ module cm_model() {   // the bare module, for views and checks
     color("black") cm_box(-cm_sw_u, cm_sw_u, cm_sw_w0, cm_pcb_w, 0, cm_axle_h+cm_sw_top);
     color("white") cm_wheel_cyl(cm_brk_r, cm_sw_w0, cm_pcb_w);
     color("red") cm_wheel_cyl(cm_wheel_d/2, cm_enc_w, cm_sw_w0);
+    if (cm_tire_od > 0) color("orangered") translate([0, cm_tire_w0, cm_axle_h]) rotate([-90,0,0]) cm_tire();
 }
 
 // ================= SCROLL (U186) =================
@@ -625,6 +645,8 @@ if (part_ == "lid") {
     if (print_orient) translate([0,0,cap_top]) rotate([180,0,0]) symbol_insert(); else symbol_insert();
 } else if (part_ == "scroll_clamp") {
     translate([0,0,cm_pcb_t+cm_clamp_t]) cm_clamp();          // flat side down
+} else if (part_ == "scroll_tire") {
+    cm_tire();
 } else if (part_ == "scroll_hood") {
     // two glue-on pads over the encoder: one on the top face, one on the front face, both laid flat
     translate([0,0,-lid_top]) intersection() { cm_hood_cap(); translate([-100,-100,lid_top]) cube(200); }
